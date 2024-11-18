@@ -91,3 +91,6 @@ src/macosx/pods/
 
 # Doxygen generated files
 doc/doxygen/
+
+# Visual Studio stuff
+.vs
