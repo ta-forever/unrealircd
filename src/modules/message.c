@@ -197,6 +197,38 @@ int has_client_mtags(MessageTag *mtags)
 	return 0;
 }
 
+static int RunPreChanMsgHooks(Client* client, Channel* channel, MessageTag** mtags, const char* text, SendType sendtype)
+{
+	int retval = HOOK_CONTINUE;
+	Hook* h;
+	for (h = Hooks[HOOKTYPE_PRE_CHANMSG]; h; h = h->next)
+	{
+		int _retval = (*(h->func.intfunc))(client, channel, mtags, text, sendtype);
+		if (_retval != HOOK_CONTINUE)
+		{
+			retval = _retval;
+		}
+	}
+
+	return retval;
+}
+
+static int RunPreUserMsgHooks(Client* client, Client* target, MessageTag** mtags, const char* text, SendType sendtype)
+{
+	int retval = HOOK_CONTINUE;
+	Hook* h;
+	for (h = Hooks[HOOKTYPE_PRE_USERMSG]; h; h = h->next)
+	{
+		int _retval = (*(h->func.intfunc))(client, target, mtags, text, sendtype);
+		if (_retval != HOOK_CONTINUE)
+		{
+			retval = _retval;
+		}
+	}
+
+	return retval;
+}
+
 /* General message handler to users and channels. Used by PRIVMSG, NOTICE, etc.
  */
 void cmd_message(Client *client, MessageTag *recv_mtags, int parc, const char *parv[], SendType sendtype)
@@ -340,7 +372,15 @@ void cmd_message(Client *client, MessageTag *recv_mtags, int parc, const char *p
 
 			new_message(client, recv_mtags, &mtags);
 
-			RunHook(HOOKTYPE_PRE_CHANMSG, client, channel, &mtags, text, sendtype);
+			int hookResult = RunPreChanMsgHooks(client, channel, &mtags, text, sendtype);
+			if (hookResult != HOOK_CONTINUE)
+			{
+				if (hookResult != HOOK_DEFER)
+				{
+					free_message_tags(mtags);
+				}
+				continue;
+			}
 
 			if (!text)
 			{
@@ -438,7 +478,19 @@ void cmd_message(Client *client, MessageTag *recv_mtags, int parc, const char *p
 					free_message_tags(mtags);
 					continue;
 				}
+
+				int hookResult = RunPreUserMsgHooks(client, target, &mtags, text, sendtype);
+				if (hookResult != HOOK_CONTINUE)
+				{
+					if (hookResult != HOOK_DEFER)
+					{
+						free_message_tags(mtags);
+					}
+					continue;
+				}
+
 				labeled_response_inhibit = 1;
+
 				if (MyUser(target))
 				{
 					/* Deliver to end-user */

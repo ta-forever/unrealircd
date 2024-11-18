@@ -1279,6 +1279,8 @@ void read_packet(int fd, int revents, void *data)
 /** Process input from clients that may have been deliberately delayed due to fake lag */
 void process_clients(void)
 {
+	RunHook(HOOKTYPE_PROCESS_CLIENTS);
+
 	Client *client;
         
 	/* Problem:

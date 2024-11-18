@@ -1308,6 +1308,10 @@ extern APICallback *APICallbackAdd(Module *module, APICallback *mreq);
 #define HOOKTYPE_SASL_AUTHENTICATE	124
 /** See hooktype_sasl_mechs */
 #define HOOKTYPE_SASL_MECHS		125
+/** See hooktype_process_clients */
+#define HOOKTYPE_PROCESS_CLIENTS	126
+/** See hooktype_pre_usermsg() */
+#define HOOKTYPE_PRE_USERMSG	127
 
 /* Adding a new hook here?
  * 1) Add the #define HOOKTYPE_.... with a new number
@@ -1525,9 +1529,21 @@ int hooktype_remote_kick(Client *client, Client *victim, Channel *channel, Messa
  * @param channel		The channel
  * @param mtags         	Message tags associated with the event (pointer-to-pointer)
  * @param text			The text that will be sent
- * @return The return value is ignored (use return 0)
+ * @return Return value HOOK_CONTINUE to proceed as normal.  HOOK_DEFER to forego actually dispatching the message.
+    For HOOK_DEFER, the mtags are not free'd, so its expected mod will assume responsibility for free'ing mtags at some point.
  */
 int hooktype_pre_chanmsg(Client *client, Channel *channel, MessageTag **mtags, const char *text, SendType sendtype);
+
+/** Called right before a message is sent to a user (function prototype for HOOKTYPE_PRE_USERMSG).
+ * If you only want to block a message, consider using hooktype_can_send_to_user() instead
+ * @param client		The client
+ * @param channel		The channel
+ * @param mtags         	Message tags associated with the event (pointer-to-pointer)
+ * @param text			The text that will be sent
+ * @return Return value HOOK_CONTINUE to proceed as normal.  HOOK_DEFER to forego actually dispatching the message.
+	For HOOK_DEFER, the mtags are not free'd, so its expected mod will assume responsibility for free'ing mtags at some point.
+ */
+int hooktype_pre_usermsg(Client* client, Client* target, MessageTag** mtags, const char* text, SendType sendtype);
 
 /** Called when a user wants to send a message to another user (function prototype for HOOKTYPE_CAN_SEND_TO_USER).
  * @param client		The sender
@@ -2426,6 +2442,11 @@ int hooktype_sasl_authenticate(Client *client, int first, const char *param);
 const char *hooktype_sasl_mechs(Client *client);
 /** @} */
 
+/** Called periodically just before process_clients()
+* @return ignored
+*/
+int hooktype_process_clients();
+
 #ifdef GCC_TYPECHECKING
 #define ValidateHook(validatefunc, func) __builtin_types_compatible_p(__typeof__(func), __typeof__(validatefunc))
 
@@ -2492,6 +2513,7 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
         ((hooktype == HOOKTYPE_FREE_CLIENT) && !ValidateHook(hooktype_free_client, func)) || \
         ((hooktype == HOOKTYPE_FREE_USER) && !ValidateHook(hooktype_free_user, func)) || \
         ((hooktype == HOOKTYPE_PRE_CHANMSG) && !ValidateHook(hooktype_pre_chanmsg, func)) || \
+        ((hooktype == HOOKTYPE_PRE_USERMSG) && !ValidateHook(hooktype_pre_usermsg, func)) || \
         ((hooktype == HOOKTYPE_KNOCK) && !ValidateHook(hooktype_knock, func)) || \
         ((hooktype == HOOKTYPE_MODECHAR_ADD) && !ValidateHook(hooktype_modechar_add, func)) || \
         ((hooktype == HOOKTYPE_MODECHAR_DEL) && !ValidateHook(hooktype_modechar_del, func)) || \
@@ -2551,7 +2573,8 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
         ((hooktype == HOOKTYPE_WATCH_DEL) && !ValidateHook(hooktype_watch_del, func)) || \
         ((hooktype == HOOKTYPE_MONITOR_NOTIFICATION) && !ValidateHook(hooktype_monitor_notification, func)) || \
         ((hooktype == HOOKTYPE_SASL_AUTHENTICATE) && !ValidateHook(hooktype_sasl_authenticate, func)) || \
-        ((hooktype == HOOKTYPE_SASL_MECHS) && !ValidateHook(hooktype_sasl_mechs, func))) \
+        ((hooktype == HOOKTYPE_SASL_MECHS) && !ValidateHook(hooktype_sasl_mechs, func)) || \
+        ((hooktype == HOOKTYPE_PROCESS_CLIENTS) && !ValidateHook(hooktype_process_clients, func))) \
         _hook_error_incompatible();
 #endif /* GCC_TYPECHECKING */
 
@@ -2559,6 +2582,7 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
 #define HOOK_CONTINUE 0
 #define HOOK_ALLOW -1
 #define HOOK_DENY 1
+#define HOOK_DEFER 2
 
 /* Callback types */
 #define CALLBACKTYPE_CLOAK 1
