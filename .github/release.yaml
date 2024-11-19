@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release Version"
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        # Upgrading to v2 will break the submodule checkout as long as ubuntu-latest ships with Git 2.17
+        uses: actions/checkout@v1
+        with:
+          submodules: true
+      - name: Publish to Github Pages
+        if: github.ref == 'refs/heads/develop'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
+      - name: Build and push Docker images
+        if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags')
+        uses: docker/build-push-action@v1.1.1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: taforever/unrealircd
+          tag_with_ref: true
