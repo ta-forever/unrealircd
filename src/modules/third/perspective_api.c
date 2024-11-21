@@ -382,6 +382,12 @@ double get_toxicity_score(const char* text, char* completion_error, int completi
 
     res = curl_easy_perform(curl);
 
+    response_data[sizeof(response_data) - 1] = '\0';
+    if (strstr(response_data, "LANGUAGE_NOT_SUPPORTED_BY_ATTRIBUTE") != NULL) {
+        curl_easy_cleanup(curl);
+        return toxicity_score;
+    }
+
     if (res == CURLE_OK) {
         json_t* root;
         json_error_t error;

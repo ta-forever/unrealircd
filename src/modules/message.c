@@ -199,34 +199,32 @@ int has_client_mtags(MessageTag *mtags)
 
 static int RunPreChanMsgHooks(Client* client, Channel* channel, MessageTag** mtags, const char* text, SendType sendtype)
 {
-	int retval = HOOK_CONTINUE;
 	Hook* h;
 	for (h = Hooks[HOOKTYPE_PRE_CHANMSG]; h; h = h->next)
 	{
-		int _retval = (*(h->func.intfunc))(client, channel, mtags, text, sendtype);
-		if (_retval != HOOK_CONTINUE)
+		int retval = (*(h->func.intfunc))(client, channel, mtags, text, sendtype);
+		if (retval != HOOK_CONTINUE)
 		{
-			retval = _retval;
+			return retval;
 		}
 	}
 
-	return retval;
+	return HOOK_CONTINUE;
 }
 
 static int RunPreUserMsgHooks(Client* client, Client* target, MessageTag** mtags, const char* text, SendType sendtype)
 {
-	int retval = HOOK_CONTINUE;
 	Hook* h;
 	for (h = Hooks[HOOKTYPE_PRE_USERMSG]; h; h = h->next)
 	{
-		int _retval = (*(h->func.intfunc))(client, target, mtags, text, sendtype);
-		if (_retval != HOOK_CONTINUE)
+		int retval = (*(h->func.intfunc))(client, target, mtags, text, sendtype);
+		if (retval != HOOK_CONTINUE)
 		{
-			retval = _retval;
+			return retval;
 		}
 	}
 
-	return retval;
+	return HOOK_CONTINUE;
 }
 
 /* General message handler to users and channels. Used by PRIVMSG, NOTICE, etc.
