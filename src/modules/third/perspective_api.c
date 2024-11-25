@@ -192,14 +192,17 @@ int perspective_api_config_run(ConfigFile* cf, ConfigEntry* ce, int type)
 
 void new_message_hook(Client* sender, MessageTag* recv_mtags, MessageTag** mtag_list, const char* signature)
 {
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[new_message_hook]");
     MessageTag* m = find_mtag(recv_mtags, TAG_NAME);
     if (m)
     {
+        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[new_message_hook] copying toxicity tag ...");
         MessageTag* new_m = safe_alloc(sizeof(MessageTag));
         new_m->name = our_strdup(TAG_NAME);
         new_m->value = our_strdup(m->value);
         AddListItem(new_m, *mtag_list);
     }
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[new_message_hook] DONE");
 }
 
 int pre_user_message_hook(Client* client, Client* target, MessageTag** mtags, const char* text, SendType sendtype)
@@ -215,11 +218,13 @@ int pre_channel_message_hook(Client* client, Channel* channel, MessageTag** mtag
 int pre_channel_or_user_message_hook(Client* client, Channel* channel, Client* target, MessageTag** mtags, const char* text, SendType sendtype)
 {
     if (is_module_disabled()) {
+        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] returning early because perspective API is disabled");
         return HOOK_CONTINUE;
     }
 
     if (!text || !IsUser(client) || !mtags || !*mtags)
     {
+        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] returning early because !text || !IsUser(client) || !mtags || !*mtags");
         return HOOK_CONTINUE;
     }
 
@@ -227,7 +232,7 @@ int pre_channel_or_user_message_hook(Client* client, Channel* channel, Client* t
         MessageTag* m;
         for (m = *mtags; m != NULL; m = m->next)
         {
-            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "channel_message_hook initial mtags: $name=$value",
+            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] initial mtags: $name=$value",
                 log_data_string("name", m->name),
                 log_data_string("value", m->value));
         }
@@ -236,10 +241,12 @@ int pre_channel_or_user_message_hook(Client* client, Channel* channel, Client* t
     MessageTag* m = find_mtag(*mtags, TAG_NAME);
     if (m)
     {
+        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] returning early because toxicity tag already present");
         return HOOK_CONTINUE;
     }
 
     // Create a new WorkingMessage struct to hold the message data
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] creating toxicity workload");
     WorkingMessage* msg_data = (WorkingMessage*)malloc(sizeof(WorkingMessage));
     msg_data->client = client;
     msg_data->channel = channel;
@@ -251,6 +258,7 @@ int pre_channel_or_user_message_hook(Client* client, Channel* channel, Client* t
     memset(msg_data->completion_error, 0, sizeof(msg_data->completion_error));
 
     // append message to working queue
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] appending workload to queue");
     QueueNode* new_node = malloc(sizeof(QueueNode));
     new_node->message = msg_data;
     new_node->next = NULL;
@@ -263,10 +271,12 @@ int pre_channel_or_user_message_hook(Client* client, Channel* channel, Client* t
     message_queue->tail = new_node;
 
     // Create a worker thread to process the toxicity check
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] creating worker thread");
     pthread_t worker_thread;
     pthread_create(&worker_thread, NULL, toxicity_worker, (void*)msg_data);
     pthread_detach(worker_thread);
 
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] DONE");
     return HOOK_DEFER;
 }
 
@@ -281,6 +291,7 @@ void* toxicity_worker(void* arg)
 int process_clients_hook()
 {
     while (!queue_is_empty(message_queue) && message_queue->head->message && message_queue->head->message->completed) {
+        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] popping complete message from message_queue");
         WorkingMessage* msg_data = queue_dequeue(message_queue);
 
         if (msg_data->completion_error[0] != '\0') {
@@ -299,6 +310,7 @@ int process_clients_hook()
             }
         }
         else {
+            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] complete message has no errors. resetting consective_errors");
             consecutive_errors = 0; // Reset error counter on success
         }
 
@@ -308,9 +320,13 @@ int process_clients_hook()
 
         MessageTag* m = find_mtag(msg_data->mtags, TAG_NAME);
         if (m) {
+            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] overwriting existing toxicity score: $toxicity",
+                log_data_string("toxicity", toxicity_score_str));
             safe_strdup(m->value, toxicity_score_str);
         }
         else {
+            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] attached new toxicity score: $toxicity",
+                log_data_string("toxicity", toxicity_score_str));
             m = safe_alloc(sizeof(MessageTag));
             m->name = our_strdup(TAG_NAME);
             m->value = our_strdup(toxicity_score_str);
@@ -333,11 +349,14 @@ int process_clients_hook()
             unreal_log(ULOG_ERROR, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "Exactly one of channel or target must be non-NULL!");
         }
 
+        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] re-dispatching PRIVMSG");
         do_cmd(msg_data->client, msg_data->mtags, "PRIVMSG", parc, parv);
 
+        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] freeing resources");
         free_message_tags(msg_data->mtags);
         free(msg_data->text);
         free(msg_data);
+        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] done with this completed message");
     }
 
     return 0;
