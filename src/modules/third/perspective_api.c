@@ -192,17 +192,13 @@ int perspective_api_config_run(ConfigFile* cf, ConfigEntry* ce, int type)
 
 void new_message_hook(Client* sender, MessageTag* recv_mtags, MessageTag** mtag_list, const char* signature)
 {
-    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[new_message_hook]");
     MessageTag* m = find_mtag(recv_mtags, TAG_NAME);
     if (m)
     {
         unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[new_message_hook] copying toxicity tag ...");
-        MessageTag* new_m = safe_alloc(sizeof(MessageTag));
-        new_m->name = our_strdup(TAG_NAME);
-        new_m->value = our_strdup(m->value);
+        MessageTag* new_m = duplicate_mtag(m);
         AddListItem(new_m, *mtag_list);
     }
-    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[new_message_hook] DONE");
 }
 
 int pre_user_message_hook(Client* client, Client* target, MessageTag** mtags, const char* text, SendType sendtype)
@@ -217,11 +213,13 @@ int pre_channel_message_hook(Client* client, Channel* channel, MessageTag** mtag
 
 int pre_channel_or_user_message_hook(Client* client, Channel* channel, Client* target, MessageTag** mtags, const char* text, SendType sendtype)
 {
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] testing is_module_disabled()");
     if (is_module_disabled()) {
         unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] returning early because perspective API is disabled");
         return HOOK_CONTINUE;
     }
 
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] testing !text || !IsUser(client) || !mtags || !*mtags)");
     if (!text || !IsUser(client) || !mtags || !*mtags)
     {
         unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] returning early because !text || !IsUser(client) || !mtags || !*mtags");
@@ -238,28 +236,38 @@ int pre_channel_or_user_message_hook(Client* client, Channel* channel, Client* t
         }
     }
 
-    MessageTag* m = find_mtag(*mtags, TAG_NAME);
-    if (m)
     {
-        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] returning early because toxicity tag already present");
-        return HOOK_CONTINUE;
+        MessageTag* m = find_mtag(*mtags, TAG_NAME);
+        if (m)
+        {
+            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] returning early because toxicity tag already present");
+            return HOOK_CONTINUE;
+        }
     }
 
     // Create a new WorkingMessage struct to hold the message data
     unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] creating toxicity workload");
-    WorkingMessage* msg_data = (WorkingMessage*)malloc(sizeof(WorkingMessage));
+    WorkingMessage* msg_data = safe_alloc(sizeof(WorkingMessage));
     msg_data->client = client;
     msg_data->channel = channel;
     msg_data->target = target;
-    msg_data->mtags = *mtags;
     msg_data->text = our_strdup(text);
     msg_data->toxicity_score = -1.0;
     msg_data->completed = false;
     memset(msg_data->completion_error, 0, sizeof(msg_data->completion_error));
 
+    //msg_data->mtags = *mtags;
+    msg_data->mtags = NULL;
+    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] duplicating mtags");
+    for (MessageTag* msg_source = *mtags; msg_source != NULL; msg_source = msg_source->next)
+    {
+        MessageTag *dup = duplicate_mtag(msg_source);
+        AppendListItem(dup, msg_data->mtags);
+    }
+
     // append message to working queue
     unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] appending workload to queue");
-    QueueNode* new_node = malloc(sizeof(QueueNode));
+    QueueNode* new_node = safe_alloc(sizeof(QueueNode));
     new_node->message = msg_data;
     new_node->next = NULL;
     if (message_queue->tail) {
@@ -277,7 +285,7 @@ int pre_channel_or_user_message_hook(Client* client, Channel* channel, Client* t
     pthread_detach(worker_thread);
 
     unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[pre_channel_or_user_message_hook] DONE");
-    return HOOK_DEFER;
+    return HOOK_DENY;
 }
 
 void* toxicity_worker(void* arg)
@@ -362,13 +370,15 @@ int process_clients_hook()
     return 0;
 }
 
+#define RESPONSE_DATA_BUFFER_SIZE 4096
+
 double get_toxicity_score(const char* text, char* completion_error, int completion_error_buffer_size)
 {
     CURLcode res;
     struct curl_slist* headers = NULL;
     char postdata[1024];
     double toxicity_score = -1;
-    char response_data[2048] = "";
+    char response_data[RESPONSE_DATA_BUFFER_SIZE] = "";
     completion_error[0] = '\0';
 
     char* api_key = get_perspective_api_key();
@@ -403,6 +413,7 @@ double get_toxicity_score(const char* text, char* completion_error, int completi
 
     response_data[sizeof(response_data) - 1] = '\0';
     if (strstr(response_data, "LANGUAGE_NOT_SUPPORTED_BY_ATTRIBUTE") != NULL) {
+        curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
         return toxicity_score;
     }
@@ -448,14 +459,21 @@ double get_toxicity_score(const char* text, char* completion_error, int completi
         snprintf(completion_error, completion_error_buffer_size, "CURL error: %s", curl_easy_strerror(res));
     }
 
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return toxicity_score;
 }
 
 size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp)
 {
-    strcat((char*)userp, (char*)contents);
-    return size * nmemb;
+    size_t ncopy = size * nmemb;
+    if (ncopy > RESPONSE_DATA_BUFFER_SIZE - 1)
+    {
+        ncopy = RESPONSE_DATA_BUFFER_SIZE - 1;
+    }
+    memcpy(userp, contents, ncopy);
+    ((char*)contents)[ncopy] = 0;
+    return ncopy;
 }
 
 static char* get_perspective_api_key()
@@ -469,7 +487,7 @@ static char* get_perspective_api_key()
 
 Queue* queue_create()
 {
-    Queue* queue = malloc(sizeof(Queue));
+    Queue* queue = safe_alloc(sizeof(Queue));
     queue->head = NULL;
     queue->tail = NULL;
     return queue;

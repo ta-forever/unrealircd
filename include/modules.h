@@ -1529,8 +1529,7 @@ int hooktype_remote_kick(Client *client, Client *victim, Channel *channel, Messa
  * @param channel		The channel
  * @param mtags         	Message tags associated with the event (pointer-to-pointer)
  * @param text			The text that will be sent
- * @return Return value HOOK_CONTINUE to proceed as normal.  HOOK_DEFER to forego actually dispatching the message.
-    For HOOK_DEFER, the mtags are not free'd, so its expected mod will assume responsibility for free'ing mtags at some point.
+ * @return Return value HOOK_CONTINUE to proceed as normal.  HOOK_DENY to forego actually dispatching the message.
  */
 int hooktype_pre_chanmsg(Client *client, Channel *channel, MessageTag **mtags, const char *text, SendType sendtype);
 
@@ -1540,8 +1539,7 @@ int hooktype_pre_chanmsg(Client *client, Channel *channel, MessageTag **mtags, c
  * @param channel		The channel
  * @param mtags         	Message tags associated with the event (pointer-to-pointer)
  * @param text			The text that will be sent
- * @return Return value HOOK_CONTINUE to proceed as normal.  HOOK_DEFER to forego actually dispatching the message.
-	For HOOK_DEFER, the mtags are not free'd, so its expected mod will assume responsibility for free'ing mtags at some point.
+ * @return Return value HOOK_CONTINUE to proceed as normal.  HOOK_DENY to forego actually dispatching the message.
  */
 int hooktype_pre_usermsg(Client* client, Client* target, MessageTag** mtags, const char* text, SendType sendtype);
 
@@ -2582,7 +2580,6 @@ _UNREAL_ERROR(_hook_error_incompatible, "Incompatible hook function. Check argum
 #define HOOK_CONTINUE 0
 #define HOOK_ALLOW -1
 #define HOOK_DENY 1
-#define HOOK_DEFER 2
 
 /* Callback types */
 #define CALLBACKTYPE_CLOAK 1

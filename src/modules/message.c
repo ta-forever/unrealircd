@@ -371,12 +371,9 @@ void cmd_message(Client *client, MessageTag *recv_mtags, int parc, const char *p
 			new_message(client, recv_mtags, &mtags);
 
 			int hookResult = RunPreChanMsgHooks(client, channel, &mtags, text, sendtype);
-			if (hookResult != HOOK_CONTINUE)
+			if (hookResult == HOOK_DENY)
 			{
-				if (hookResult != HOOK_DEFER)
-				{
-					free_message_tags(mtags);
-				}
+				free_message_tags(mtags);
 				continue;
 			}
 
@@ -478,12 +475,9 @@ void cmd_message(Client *client, MessageTag *recv_mtags, int parc, const char *p
 				}
 
 				int hookResult = RunPreUserMsgHooks(client, target, &mtags, text, sendtype);
-				if (hookResult != HOOK_CONTINUE)
+				if (hookResult == HOOK_DENY)
 				{
-					if (hookResult != HOOK_DEFER)
-					{
-						free_message_tags(mtags);
-					}
+					free_message_tags(mtags);
 					continue;
 				}
 
