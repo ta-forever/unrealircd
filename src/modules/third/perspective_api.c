@@ -302,6 +302,39 @@ int process_clients_hook()
         unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] popping complete message from message_queue");
         WorkingMessage* msg_data = queue_dequeue(message_queue);
 
+        bool okToDispatch = true;
+        if (msg_data->client) {
+            Client* acptr;
+            bool stillOnline = false;
+            list_for_each_entry(acptr, &client_list, client_node) {
+                if (acptr == msg_data->client) {
+                    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] client apparently still online");
+                    stillOnline = true;
+                    break;
+                }
+            }
+            if (!stillOnline) {
+                unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] client apparently is gone");
+                okToDispatch = false;
+            }
+        }
+
+        if (msg_data->target) {
+            Client* acptr;
+            bool stillOnline = false;
+            list_for_each_entry(acptr, &client_list, client_node) {
+                if (acptr == msg_data->target) {
+                    unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] target apparently still online");
+                    stillOnline = true;
+                    break;
+                }
+            }
+            if (!stillOnline) {
+                unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] target apparently is gone");
+                okToDispatch = false;
+            }
+        }
+
         if (msg_data->completion_error[0] != '\0') {
             consecutive_errors++;
             unreal_log(ULOG_ERROR, "perspective_api", "ERROR_TRACKING", NULL,
@@ -322,43 +355,44 @@ int process_clients_hook()
             consecutive_errors = 0; // Reset error counter on success
         }
 
-        // Toxicity score is attached regardless of validity.  we don't try again
-        char toxicity_score_str[16] = { '\0' };
-        snprintf(toxicity_score_str, sizeof(toxicity_score_str), "%.2f", msg_data->toxicity_score);
+        if (okToDispatch) {
+            // Toxicity score is attached regardless of validity.  we don't try again
+            char toxicity_score_str[16] = { '\0' };
+            snprintf(toxicity_score_str, sizeof(toxicity_score_str), "%.2f", msg_data->toxicity_score);
 
-        MessageTag* m = find_mtag(msg_data->mtags, TAG_NAME);
-        if (m) {
-            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] overwriting existing toxicity score: $toxicity",
-                log_data_string("toxicity", toxicity_score_str));
-            safe_strdup(m->value, toxicity_score_str);
-        }
-        else {
-            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] attached new toxicity score: $toxicity",
-                log_data_string("toxicity", toxicity_score_str));
-            m = safe_alloc(sizeof(MessageTag));
-            m->name = our_strdup(TAG_NAME);
-            m->value = our_strdup(toxicity_score_str);
-            AddListItem(m, msg_data->mtags);
-        }
+            MessageTag* m = find_mtag(msg_data->mtags, TAG_NAME);
+            if (m) {
+                unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] overwriting existing toxicity score: $toxicity",
+                    log_data_string("toxicity", toxicity_score_str));
+                safe_strdup(m->value, toxicity_score_str);
+            }
+            else {
+                unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] attached new toxicity score: $toxicity",
+                    log_data_string("toxicity", toxicity_score_str));
+                m = safe_alloc(sizeof(MessageTag));
+                m->name = our_strdup(TAG_NAME);
+                m->value = our_strdup(toxicity_score_str);
+                AddListItem(m, msg_data->mtags);
+            }
 
-        // Prepare parameters for the PRIVMSG command
-        const char* parv[3];
-        int parc = 3;
+            // Prepare parameters for the PRIVMSG command
+            const char* parv[3];
+            int parc = 3;
+            parv[0] = msg_data->client->name;   // Source (sender)
+            parv[2] = msg_data->text;          // Message text
+            if (msg_data->channel) {
+                parv[1] = msg_data->channel->name; // Target (channel)
+            }
+            else if (msg_data->target) {
+                parv[1] = msg_data->target->name; // Target (channel)
+            }
+            else {
+                unreal_log(ULOG_ERROR, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "Exactly one of channel or target must be non-NULL!");
+            }
 
-        parv[0] = msg_data->client->name;   // Source (sender)
-        parv[2] = msg_data->text;          // Message text
-        if (msg_data->channel) {
-            parv[1] = msg_data->channel->name; // Target (channel)
+            unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] re-dispatching PRIVMSG");
+            do_cmd(msg_data->client, msg_data->mtags, "PRIVMSG", parc, parv);
         }
-        else if (msg_data->target) {
-            parv[1] = msg_data->target->name; // Target (channel)
-        }
-        else {
-            unreal_log(ULOG_ERROR, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "Exactly one of channel or target must be non-NULL!");
-        }
-
-        unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] re-dispatching PRIVMSG");
-        do_cmd(msg_data->client, msg_data->mtags, "PRIVMSG", parc, parv);
 
         unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] freeing resources");
         free_message_tags(msg_data->mtags);
@@ -366,7 +400,6 @@ int process_clients_hook()
         free(msg_data);
         unreal_log(ULOG_DEBUG, "perspective_api", "PERSPECTIVE_API_DEBUG", NULL, "[process_clients_hook] done with this completed message");
     }
-
     return 0;
 }
 

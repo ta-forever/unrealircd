@@ -12,7 +12,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
     apt-get -qq update && \
     apt-get -yqq --no-install-recommends install \
         locales curl openssl build-essential pkg-config libssl-dev libpcre2-dev \
-        libargon2-0-dev libsodium-dev libc-ares-dev libcurl4-openssl-dev && \
+        libargon2-dev libsodium-dev libc-ares-dev libcurl4-openssl-dev && \
     sed -i -e 's/# en_GB.UTF-8 UTF-8/en_GB.UTF-8 UTF-8/' /etc/locale.gen && \
     dpkg-reconfigure --frontend=noninteractive locales && \
     update-locale LANG=en_GB.UTF-8 && \
@@ -38,7 +38,7 @@ USER root
 
 RUN apt-get -yqq remove --purge \
         curl openssl build-essential pkg-config libssl-dev libpcre2-dev \
-        libargon2-0-dev libsodium-dev libc-ares-dev libcurl4-openssl-dev && \
+        libargon2-dev libsodium-dev libc-ares-dev libcurl4-openssl-dev && \
     apt-get -yqq autoremove --purge && \
     rm -rf /install && \
     rm -f /unrealircd/source && \
