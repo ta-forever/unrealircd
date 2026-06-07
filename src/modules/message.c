@@ -119,9 +119,12 @@ int can_send_to_user(Client *client, Client *target, const char **msgtext, const
 	{
 		int spamtype = (sendtype == SEND_TYPE_NOTICE ? SPAMF_USERNOTICE : SPAMF_USERMSG);
 		const char *cmd = sendtype_to_cmd(sendtype);
+		const char *replaced = NULL;
 
-		if (match_spamfilter(client, *msgtext, spamtype, cmd, target->name, 0, NULL))
+		if (match_spamfilter(client, *msgtext, spamtype, cmd, target->name, 0, NULL, &replaced))
 			return 0;
+		if (replaced)
+			*msgtext = replaced;
 	}
 
 	n = HOOK_CONTINUE;
@@ -363,9 +366,12 @@ void cmd_message(Client *client, MessageTag *recv_mtags, int parc, const char *p
 			if (MyUser(client) && (sendtype != SEND_TYPE_TAGMSG))
 			{
 				int spamtype = (sendtype == SEND_TYPE_NOTICE ? SPAMF_CHANNOTICE : SPAMF_CHANMSG);
+				const char *replaced = NULL;
 
-				if (match_spamfilter(client, text, spamtype, cmd, channel->name, 0, NULL))
+				if (match_spamfilter(client, text, spamtype, cmd, channel->name, 0, NULL, &replaced))
 					return;
+				if (replaced)
+					text = (char *)replaced;  /* safe: we own the flow here */
 			}
 
 			new_message(client, recv_mtags, &mtags);

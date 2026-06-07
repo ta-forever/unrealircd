@@ -125,8 +125,13 @@ CMD_FUNC(cmd_away)
 	strlncpy(reason, parv[1], sizeof(reason), iConf.away_length);
 
 	/* Check spamfilters */
-	if (MyUser(client) && match_spamfilter(client, reason, SPAMF_AWAY, "AWAY", NULL, 0, NULL))
-		return;
+	{
+		const char *replaced = NULL;
+		if (MyUser(client) && match_spamfilter(client, reason, SPAMF_AWAY, "AWAY", NULL, 0, NULL, &replaced))
+			return;
+		if (replaced)
+			strlncpy(reason, replaced, sizeof(reason), iConf.away_length);
+	}
 
 	/* Check away-flood */
 	if (MyUser(client) &&

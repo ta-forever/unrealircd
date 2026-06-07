@@ -458,6 +458,7 @@ typedef enum ClientStatus {
 #define PROTO_MTAGS	0x000040	/* Support message tags and big buffers */
 #define PROTO_NEXTBANS	0x000080	/* Server supports named extended bans */
 #define PROTO_BIGLINES	0x000100	/* BIGLINES support */
+#define PROTO_SFREPLACE	0x000200	/* Server understands the spamfilter 'replace' field in TKL sync */
 
 /* For client capabilities: */
 #define CAP_INVERT	1L
@@ -625,6 +626,7 @@ typedef enum ClientStatus {
 #define SupportMTAGS(x)		(CHECKSERVERPROTO(x, PROTO_MTAGS))
 #define SupportNEXTBANS(x)	(CHECKSERVERPROTO(x, PROTO_NEXTBANS))
 #define SupportBIGLINES(x)	(CHECKSERVERPROTO(x, PROTO_BIGLINES))
+#define SupportSFREPLACE(x)	(CHECKSERVERPROTO(x, PROTO_SFREPLACE))
 
 #define SetVL(x)		((x)->local->proto |= PROTO_VL)
 #define SetSJSBY(x)		((x)->local->proto |= PROTO_SJSBY)
@@ -633,6 +635,7 @@ typedef enum ClientStatus {
 #define SetMTAGS(x)		((x)->local->proto |= PROTO_MTAGS)
 #define SetNEXTBANS(x)		((x)->local->proto |= PROTO_NEXTBANS)
 #define SetBIGLINES(x)		((x)->local->proto |= PROTO_BIGLINES)
+#define SetSFREPLACE(x)		((x)->local->proto |= PROTO_SFREPLACE)
 
 /* Dcc deny types (see src/s_extra.c) */
 #define DCCDENY_HARD	0
@@ -1193,6 +1196,7 @@ typedef enum BanActionValue {
 	// anything above BAN_ACT_SET will will cause a log message to be emitted
 	BAN_ACT_SET		=  30,
 	BAN_ACT_STOP		=   5,
+	BAN_ACT_REPLACE		=  20,
 } BanActionValue;
 
 typedef enum VarActionValue {
@@ -1250,6 +1254,7 @@ struct Spamfilter {
 	long long hits; /**< Spamfilter hits (except exempts) */
 	long long hits_except; /**< Spamfilter hits by exempt clients */
 	SecurityGroup *except; /**< Don't run this spamfitler at all for these users (not counting towards hits_except btw) */
+	char *replace; /**< Replacement template for BAN_ACT_REPLACE (PCRE2 substitution syntax, e.g. "MED-${1}") */
 };
 
 /** Ban exception sub-struct of TKL entry (ELINE) */

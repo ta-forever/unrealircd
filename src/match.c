@@ -495,6 +495,49 @@ char *unreal_match_method_valtostr(int val)
 	return "unknown";
 }
 
+/** Perform PCRE2 substitution (replacement) on 'subject' using 'replacement' template.
+ * Supports $1, ${1}, ${name} etc.
+ * @returns pointer to (static) result buffer, or the original subject if no substitution occurred or on error.
+ * @note The returned buffer is overwritten on next call.
+ */
+const char *unreal_pcre2_substitute(pcre2_code *re, const char *subject, const char *replacement)
+{
+	static char result[4096];
+	char subjcopy[4096];
+	PCRE2_SIZE outlen = sizeof(result) - 1;
+	int rc;
+	pcre2_match_data *md;
+
+	if (!re || !subject || !replacement)
+		return subject;
+
+	/* Copy the subject into a local buffer so 'subject' and the output buffer
+	 * can never overlap: for chained substitutions the caller passes our own
+	 * static 'result' buffer back in as 'subject', and pcre2_substitute does
+	 * not permit the input and output buffers to alias.
+	 */
+	if (strlen(subject) >= sizeof(subjcopy))
+		return subject; /* too long to process safely; leave unchanged */
+	strlcpy(subjcopy, subject, sizeof(subjcopy));
+
+	md = pcre2_match_data_create(32, NULL);
+	if (!md)
+		return subject;
+	rc = pcre2_substitute(re,
+	                      (PCRE2_SPTR)subjcopy, PCRE2_ZERO_TERMINATED, 0,
+	                      PCRE2_SUBSTITUTE_GLOBAL | PCRE2_SUBSTITUTE_EXTENDED,
+	                      md, NULL,
+	                      (PCRE2_SPTR)replacement, PCRE2_ZERO_TERMINATED,
+	                      (PCRE2_UCHAR *)result, &outlen);
+	pcre2_match_data_free(md);
+
+	if (rc <= 0)
+		return subject; /* 0 = no matches, <0 = error; return original */
+
+	result[outlen] = '\0';
+	return result;
+}
+
 /* It is unfortunately that we have 2 matching/replace systems.
  * However, the above is for spamfilter matching and stuff
  * and below is for matching on WORDS, which does specific things

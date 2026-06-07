@@ -81,6 +81,7 @@ static BanActTable banacttable[] = {
 	{ BAN_ACT_SET,		'1',	"set",			1 },
 	{ BAN_ACT_REPORT,	'r',	"report",		1 },
 	{ BAN_ACT_STOP,		'0',	"stop",			1 },
+	{ BAN_ACT_REPLACE,	'R',	"replace",		0 },
 	{ 0, 0, 0, 0 }
 };
 

@@ -74,6 +74,7 @@ TKL *_tkl_add_spamfilter(int type, const char *id, unsigned short target, BanAct
                          const char *set_by,
                          time_t expire_at, time_t set_at,
                          time_t spamf_tkl_duration, const char *spamf_tkl_reason,
+                         const char *spamf_replace,
                          int flags);
 void _sendnotice_tkl_del(char *removed_by, TKL *tkl);
 void _sendnotice_tkl_add(TKL *tkl);
@@ -92,7 +93,7 @@ void _tkl_stats(Client *client, int type, const char *para, int *cnt);
 void _tkl_sync(Client *client);
 CMD_FUNC(_cmd_tkl);
 int _take_action(Client *client, BanAction *action, char *reason, long duration, int take_action_flags, int *stopped);
-int _match_spamfilter(Client *client, const char *str_in, int type, const char *cmd, const char *target, int flags, TKL **rettk);
+int _match_spamfilter(Client *client, const char *str_in, int type, const char *cmd, const char *target, int flags, TKL **rettk, const char **replaced);
 int _match_spamfilter_mtags(Client *client, MessageTag *mtags, char *cmd);
 int check_special_spamfilters_present(void);
 int _join_viruschan(Client *client, TKL *tk, int type);
@@ -274,8 +275,8 @@ int tkl_config_test_spamfilter(ConfigFile *cf, ConfigEntry *ce, int type, int *e
 {
 	ConfigEntry *cep, *cepp;
 	int errors = 0;
-	char *match = NULL, *reason = NULL;
-	char has_target = 0, has_id = 0, has_match = 0, has_rule = 0, has_action = 0, has_reason = 0, has_bantime = 0, has_match_type = 0;
+	char *match = NULL, *reason = NULL, *replace = NULL;
+	char has_target = 0, has_id = 0, has_match = 0, has_rule = 0, has_action = 0, has_reason = 0, has_bantime = 0, has_match_type = 0, has_replace = 0;
 	char central_spamfilter = 0;
 	int match_type = 0;
 
@@ -372,6 +373,17 @@ int tkl_config_test_spamfilter(ConfigFile *cf, ConfigEntry *ce, int type, int *e
 			}
 			has_reason = 1;
 			reason = cep->value;
+		}
+		else if (!strcmp(cep->name, "replace"))
+		{
+			if (has_replace)
+			{
+				config_warn_duplicate(cep->file->filename,
+					cep->line_number, "spamfilter::replace");
+				continue;
+			}
+			has_replace = 1;
+			replace = cep->value;
 		}
 		else if (!strcmp(cep->name, "match") || !strcmp(cep->name, "match-string"))
 		{
@@ -555,6 +567,7 @@ int tkl_config_run_spamfilter(ConfigFile *cf, ConfigEntry *ce, int type)
 	char *id = NULL;
 	char *match = NULL;
 	char *rule = NULL;
+	char *spamfilter_replace = NULL;
 	time_t bantime = tempiConf.spamfilter_ban_time;
 	char *banreason = tempiConf.spamfilter_ban_reason;
 	BanAction *action = NULL;
@@ -620,6 +633,10 @@ int tkl_config_run_spamfilter(ConfigFile *cf, ConfigEntry *ce, int type)
 		{
 			conf_match_block(cf, cep, &except);
 		}
+		else if (!strcmp(cep->name, "replace"))
+		{
+			spamfilter_replace = cep->value;
+		}
 	}
 
 	if (!match && rule)
@@ -666,6 +683,7 @@ int tkl_config_run_spamfilter(ConfigFile *cf, ConfigEntry *ce, int type)
 	                   TStime(),
 	                   bantime,
 	                   banreason,
+	                   spamfilter_replace,
 	                   flag);
 	return 1;
 }
@@ -2277,7 +2295,8 @@ CMD_FUNC(cmd_eline)
 /** Helper function for cmd_spamfilter, explaining usage. */
 void spamfilter_usage(Client *client)
 {
-	sendnotice(client, "Use: /spamfilter [add|del|remove|+|-] [-simple|-regex] [type] [action] [tkltime] [tklreason] [regex]");
+	sendnotice(client, "Use: /spamfilter [add|del|remove|+|-] [-simple|-regex] [type] [action] [tkltime] [tklreason] [regex] [replacement]");
+	sendnotice(client, "When action is 'replace', supply the replacement template as the 8th parameter (supports $1 ${name} etc).");
 	sendnotice(client, "See '/helpop ?spamfilter' for more information.");
 	sendnotice(client, "For an easy way to remove an existing spamfilter, use '/spamfilter del' without additional parameters");
 }
@@ -2302,7 +2321,7 @@ void spamfilter_del_by_id(Client *client, const char *id)
 	TKL *tk;
 	int found = 0;
 	char mo[32], mo2[32];
-	const char *tkllayer[13] = {
+	const char *tkllayer[14] = {
 		me.name,	/*  0 server.name */
 		NULL,		/*  1 +|- */
 		"F",		/*  2 F   */
@@ -2315,6 +2334,7 @@ void spamfilter_del_by_id(Client *client, const char *id)
 		"",			/*  9 tkl reason */
 		"",			/* 10 match method */
 		"",			/* 11 regex */
+		"",			/* 12 replace */
 		NULL
 	};
 
@@ -2348,11 +2368,12 @@ void spamfilter_del_by_id(Client *client, const char *id)
 	tkllayer[8] = "-";
 	tkllayer[9] = "-";
 	tkllayer[10] = unreal_match_method_valtostr(tk->ptr.spamfilter->match->type); /* matching type */
-	tkllayer[11] = tk->ptr.spamfilter->match->str; /* regex */
+	tkllayer[11] = tk->ptr.spamfilter->replace ? tk->ptr.spamfilter->replace : "";
+	tkllayer[12] = tk->ptr.spamfilter->match->str; /* regex (trailing) */
 	ircsnprintf(mo2, sizeof(mo2), "%lld", (long long)TStime());
 	tkllayer[7] = mo2; /* deletion time */
 
-	cmd_tkl(&me, NULL, 12, tkllayer);
+	cmd_tkl(&me, NULL, 13, tkllayer);
 }
 
 /** Spamfilter to fight spam, advertising, worms and other bad things on IRC.
@@ -2365,7 +2386,7 @@ CMD_FUNC(cmd_spamfilter)
 {
 	int add = 1;
 	char mo[32], mo2[32];
-	const char *tkllayer[13] = {
+	const char *tkllayer[14] = {
 		me.name,	/*  0 server.name */
 		NULL,		/*  1 +|- */
 		"F",		/*  2 F   */
@@ -2378,6 +2399,7 @@ CMD_FUNC(cmd_spamfilter)
 		"",			/*  9 tkl reason */
 		"",			/* 10 match method */
 		"",			/* 11 regex */
+		"",			/* 12 replace (for action 'replace') */
 		NULL
 	};
 	int targets = 0, action = 0;
@@ -2444,6 +2466,7 @@ CMD_FUNC(cmd_spamfilter)
 	 * parv[5]: tkl time
 	 * parv[6]: tkl reason (or block reason..)
 	 * parv[7]: regex
+	 * parv[8]: replacement (only when action is 'replace')
 	 */
 	if (!strcasecmp(parv[1], "add") || !strcmp(parv[1], "+"))
 		add = 1;
@@ -2489,6 +2512,12 @@ CMD_FUNC(cmd_spamfilter)
 	actionbuf[0] = banact_valtochar(action);
 	actionbuf[1] = '\0';
 
+	if (add && (action == BAN_ACT_REPLACE) && (parc <= 8 || BadPtr(parv[8])))
+	{
+		sendnotice(client, "The 'replace' action requires an 8th parameter with the replacement template (e.g. 'NEW-$1' or 'MED-${maj}.${min}').");
+		return;
+	}
+
 	if (add)
 	{
 		/* now check the regex / match field... */
@@ -2521,7 +2550,8 @@ CMD_FUNC(cmd_spamfilter)
 
 	tkllayer[9] = reason;
 	tkllayer[10] = parv[2]+1; /* +1 to skip the '-' */
-	tkllayer[11] = parv[7];
+	tkllayer[11] = (parc > 8) ? parv[8] : "";  /* replace (before regex) */
+	tkllayer[12] = parv[7]; /* regex (will be the trailing parameter) */
 
 	/* SPAMFILTER LENGTH CHECK.
 	 * We try to limit it here so '/stats f' output shows ok, output of that is:
@@ -2532,6 +2562,8 @@ CMD_FUNC(cmd_spamfilter)
 	 * on 50 characters for the rest... -- Syzop
 	 */
 	n = strlen(reason) + strlen(parv[7]) + strlen(tkllayer[6]) + (NICKLEN * 2) + 40;
+	if (parc > 8)
+		n += strlen(parv[8]);
 	if ((n > 500) && add)
 	{
 		sendnotice(client, "Sorry, spamfilter too long. You'll either have to trim down the "
@@ -2545,7 +2577,7 @@ CMD_FUNC(cmd_spamfilter)
 		tkllayer[7] = mo2;
 	}
 
-	cmd_tkl(&me, NULL, 12, tkllayer);
+	cmd_tkl(&me, NULL, 13, tkllayer);
 }
 
 /** tkl hash method.
@@ -2826,6 +2858,7 @@ TKL *_tkl_add_spamfilter(int type, const char *id, unsigned short target, BanAct
                          const char *set_by,
                          time_t expire_at, time_t set_at,
                          time_t tkl_duration, const char *tkl_reason,
+                         const char *spamf_replace,
                          int flags)
 {
 	TKL *tkl;
@@ -2862,6 +2895,7 @@ TKL *_tkl_add_spamfilter(int type, const char *id, unsigned short target, BanAct
 	tkl->ptr.spamfilter->except = except;
 	tkl->ptr.spamfilter->tkl_duration = tkl_duration;
 	safe_strdup(tkl->ptr.spamfilter->id, id);
+	safe_strdup(tkl->ptr.spamfilter->replace, spamf_replace);
 
 	if (tkl->ptr.spamfilter->target & SPAMF_USER)
 		loop.do_bancheck_spamf_user = 1;
@@ -3093,6 +3127,7 @@ void _free_tkl(TKL *tkl)
 		safe_free_all_ban_actions(tkl->ptr.spamfilter->action);
 		safe_free(tkl->ptr.spamfilter->prettyrule);
 		safe_free(tkl->ptr.spamfilter->id);
+		safe_free(tkl->ptr.spamfilter->replace);
 		safe_free(tkl->ptr.spamfilter);
 	} else
 	if (TKLIsBanException(tkl) && tkl->ptr.banexception)
@@ -3640,7 +3675,7 @@ int _find_spamfilter_user(Client *client, int flags)
 		return 0;
 
 	spamfilter_build_user_string(spamfilter_user, client->name, client);
-	return match_spamfilter(client, spamfilter_user, SPAMF_USER, NULL, NULL, flags, NULL);
+	return match_spamfilter(client, spamfilter_user, SPAMF_USER, NULL, NULL, flags, NULL, NULL);
 }
 
 /** Check a spamfilter against all local users and print a message.
@@ -4140,16 +4175,35 @@ void tkl_sync_send_entry(int add, Client *sender, Client *to, TKL *tkl)
 	} else
 	if (TKLIsSpamfilter(tkl))
 	{
-		sendto_one(to, NULL, ":%s TKL %c %c %s %c %s %lld %lld %lld %s %s :%s", sender->name,
-			   add ? '+' : '-',
-			   typ,
-			   spamfilter_target_inttostring(tkl->ptr.spamfilter->target),
-			   banact_valtochar(tkl->ptr.spamfilter->action->action),
-			   tkl->set_by,
-			   (long long)tkl->expire_at, (long long)tkl->set_at,
-			   (long long)tkl->ptr.spamfilter->tkl_duration, tkl->ptr.spamfilter->tkl_reason,
-			   unreal_match_method_valtostr(tkl->ptr.spamfilter->match->type),
-			   tkl->ptr.spamfilter->match->str);
+		if (SupportSFREPLACE(to))
+		{
+			/* New format: includes the 'replace' field (before the trailing regex) */
+			sendto_one(to, NULL, ":%s TKL %c %c %s %c %s %lld %lld %lld %s %s %s :%s", sender->name,
+				   add ? '+' : '-',
+				   typ,
+				   spamfilter_target_inttostring(tkl->ptr.spamfilter->target),
+				   banact_valtochar(tkl->ptr.spamfilter->action->action),
+				   tkl->set_by,
+				   (long long)tkl->expire_at, (long long)tkl->set_at,
+				   (long long)tkl->ptr.spamfilter->tkl_duration, tkl->ptr.spamfilter->tkl_reason,
+				   unreal_match_method_valtostr(tkl->ptr.spamfilter->match->type),
+				   tkl->ptr.spamfilter->replace ? tkl->ptr.spamfilter->replace : "",
+				   tkl->ptr.spamfilter->match->str);
+		} else {
+			/* Legacy format (peer does not understand 'replace'): omit the field
+			 * so the trailing parameter is the regex, as older servers expect.
+			 */
+			sendto_one(to, NULL, ":%s TKL %c %c %s %c %s %lld %lld %lld %s %s :%s", sender->name,
+				   add ? '+' : '-',
+				   typ,
+				   spamfilter_target_inttostring(tkl->ptr.spamfilter->target),
+				   banact_valtochar(tkl->ptr.spamfilter->action->action),
+				   tkl->set_by,
+				   (long long)tkl->expire_at, (long long)tkl->set_at,
+				   (long long)tkl->ptr.spamfilter->tkl_duration, tkl->ptr.spamfilter->tkl_reason,
+				   unreal_match_method_valtostr(tkl->ptr.spamfilter->match->type),
+				   tkl->ptr.spamfilter->match->str);
+		}
 	} else
 	if (TKLIsBanException(tkl))
 	{
@@ -4605,7 +4659,7 @@ CMD_FUNC(cmd_tkl_add)
 			return;
 		}
 
-		match_string = parv[11];
+		match_string = (parc > 12) ? parv[12] : parv[11];
 
 		match_method = unreal_match_method_strtoval(parv[10]);
 		if (match_method == 0)
@@ -4640,12 +4694,16 @@ CMD_FUNC(cmd_tkl_add)
 
 		tkl_duration = config_checkval(parv[8], CFG_TIME);
 		tkl_reason = parv[9];
+		const char *spamf_replace = (parc > 12) ? parv[11] : NULL;
 
 		tkl = find_tkl_spamfilter(type, match_string, action, target);
 
 		if (tkl)
 		{
 			tkl_entry_exists = 1;
+			/* Entry already exists; the 'replace' template may have changed, so update it. */
+			if (spamf_replace)
+				safe_strdup(tkl->ptr.spamfilter->replace, spamf_replace);
 		} else {
 			m = unreal_create_match(match_method, match_string, &err);
 			if (!m)
@@ -4657,9 +4715,10 @@ CMD_FUNC(cmd_tkl_add)
 					log_data_string("spamfilter_regex_error", err));
 				return;
 			}
+			/* tkl_add_spamfilter() already stores the 'replace' template */
 			tkl = tkl_add_spamfilter(type, NULL, target, banact_value_to_struct(action), m, NULL, NULL,
 			                         set_by, expire_at, set_at,
-			                         tkl_duration, tkl_reason, 0);
+			                         tkl_duration, tkl_reason, spamf_replace, 0);
 		}
 	} else
 	{
@@ -5359,7 +5418,7 @@ static void match_spamfilter_hit(Client *client, const char *str_in, const char 
  * @returns 0 if not matched, otherwise one of BAN_ACT_* (>=1) if spamfilter matched
  *          and it should be blocked or client exited. If >=1 then be sure to check IsDead(client)!!
  */
-int _match_spamfilter(Client *client, const char *str_in, int target, const char *cmd, const char *destination, int flags, TKL **rettkl)
+int _match_spamfilter(Client *client, const char *str_in, int target, const char *cmd, const char *destination, int flags, TKL **rettkl, const char **replaced)
 {
 	TKL *tkl;
 	TKL *winner_tkl = NULL;
@@ -5378,6 +5437,11 @@ int _match_spamfilter(Client *client, const char *str_in, int target, const char
 	int content_revealed = 0;
 	crule_context context;
 
+	const char *current_text;
+
+	if (replaced)
+		*replaced = NULL;
+
 	if (rettkl)
 		*rettkl = NULL; /* initialize to NULL */
 
@@ -5388,6 +5452,8 @@ int _match_spamfilter(Client *client, const char *str_in, int target, const char
 		str = str_in;
 	else
 		str = StripControlCodes(str_in);
+
+	current_text = str; /* must be after 'str' is assigned above */
 
 	/* (note: using client->user check here instead of IsUser()
 	 * due to SPAMF_USER where user isn't marked as client/person yet.
@@ -5506,6 +5572,20 @@ int _match_spamfilter(Client *client, const char *str_in, int target, const char
 			                     &stop_processing_general_spamfilters, &stop_processing_general_spamfilters,
 			                     &content_revealed,
 			                     0);
+
+			/* Apply any 'replace' transformations (chained). Matching was against original 'str',
+			 * but we transform the output text progressively for the caller.
+			 */
+			if (tkl->ptr.spamfilter->replace && tkl->ptr.spamfilter->replace[0] &&
+			    has_actions_of_type(tkl->ptr.spamfilter->action, BAN_ACT_REPLACE) &&
+			    tkl->ptr.spamfilter->match &&
+			    tkl->ptr.spamfilter->match->type == MATCH_PCRE_REGEX)
+			{
+				const char *newstr = unreal_pcre2_substitute(tkl->ptr.spamfilter->match->ext.pcre2_expr,
+				                                             current_text, tkl->ptr.spamfilter->replace);
+				if (newstr && newstr != current_text)
+					current_text = newstr;
+			}
 		}
 	}
 
@@ -5565,9 +5645,24 @@ int _match_spamfilter(Client *client, const char *str_in, int target, const char
 			                       &stop_processing_general_spamfilters, &stop_processing_general_spamfilters,
 			                       &content_revealed,
 			                       1);
+
+			/* Apply any 'replace' transformations (chained) */
+			if (tkl->ptr.spamfilter->replace && tkl->ptr.spamfilter->replace[0] &&
+			    has_actions_of_type(tkl->ptr.spamfilter->action, BAN_ACT_REPLACE) &&
+			    tkl->ptr.spamfilter->match &&
+			    tkl->ptr.spamfilter->match->type == MATCH_PCRE_REGEX)
+			{
+				const char *newstr = unreal_pcre2_substitute(tkl->ptr.spamfilter->match->ext.pcre2_expr,
+				                                             current_text, tkl->ptr.spamfilter->replace);
+				if (newstr && newstr != current_text)
+					current_text = newstr;
+			}
 			/* and continue (yes, always, no stopping on first match) */
 		}
 	}
+
+	if (replaced && current_text != str)
+		*replaced = current_text;
 
 	tkl = winner_tkl;
 	if (!tkl)
@@ -5579,6 +5674,8 @@ int _match_spamfilter(Client *client, const char *str_in, int target, const char
 	/* Spamfilter matched */
 	reason = unreal_decodespace(tkl->ptr.spamfilter->tkl_reason);
 	ret = take_action(client, tkl->ptr.spamfilter->action, reason, tkl->ptr.spamfilter->tkl_duration, TAKE_ACTION_SKIP_SET, NULL);
+	if (ret == BAN_ACT_REPLACE)
+		ret = 0; /* 'replace' is a transformation, not a blocking action */
 	if (!IsDead(client))
 	{
 		if ((ret == BAN_ACT_BLOCK) || (ret == BAN_ACT_SOFT_BLOCK))
@@ -5705,7 +5802,7 @@ int _match_spamfilter_mtags(Client *client, MessageTag *mtags, char *cmd)
 		} else {
 			str = m->name;
 		}
-		if (match_spamfilter(client, str, SPAMF_MTAG, cmd, NULL, 0, NULL))
+		if (match_spamfilter(client, str, SPAMF_MTAG, cmd, NULL, 0, NULL, NULL))
 			return 1;
 	}
 	return 0;
@@ -6065,7 +6162,7 @@ int spamfilter_pre_command(Client *from, MessageTag *mtags, const char *buf)
 		return 0;
 
 	cmd = getcmd(buf, cmdbuf, sizeof(cmdbuf));
-	ret = match_spamfilter(from, buf, SPAMF_RAW, cmd, NULL, 0, NULL);
+	ret = match_spamfilter(from, buf, SPAMF_RAW, cmd, NULL, 0, NULL, NULL);
 	if (ret > 0)
 		return HOOK_DENY;
 

@@ -28,8 +28,11 @@ ModuleHeader MOD_HEADER = {
 };
 
 #define TKLDB_MAGIC 0x10101010
-/* Database version */
-#define TKLDB_VERSION 4999
+/* Database version.
+ * 4999 = base version
+ * 5000 = adds spamfilter 'replace' field
+ */
+#define TKLDB_VERSION 5000
 /* Save tkls to file every <this> seconds */
 #define TKLDB_SAVE_EVERY 300
 /* The very first save after boot, apply this delta, this
@@ -446,6 +449,8 @@ int write_tkline(UnrealDB *db, const char *tmpfname, TKL *tkl)
 		W_SAFE(unrealdb_write_char(db, action));
 		W_SAFE(unrealdb_write_str(db, tkl->ptr.spamfilter->tkl_reason));
 		W_SAFE(unrealdb_write_int64(db, tkl->ptr.spamfilter->tkl_duration));
+		/* 'replace' field (TKLDB_VERSION >= 5000) */
+		W_SAFE(unrealdb_write_str(db, tkl->ptr.spamfilter->replace ? tkl->ptr.spamfilter->replace : ""));
 	}
 
 	return 1;
@@ -727,6 +732,15 @@ int read_tkldb(void)
 			R_SAFE(unrealdb_read_int64(db, &v));
 			tkl->ptr.spamfilter->tkl_duration = v;
 
+			/* 'replace' field was added in TKLDB_VERSION 5000 */
+			if (version >= 5000)
+			{
+				R_SAFE(unrealdb_read_str(db, &str));
+				if (str && *str)
+					safe_strdup(tkl->ptr.spamfilter->replace, str);
+				safe_free(str);
+			}
+
 			if (!do_not_add &&
 			    find_tkl_spamfilter(tkl->type, tkl->ptr.spamfilter->match->str,
 			                        tkl->ptr.spamfilter->action->action,
@@ -752,6 +766,7 @@ int read_tkldb(void)
 				                   tkl->set_by, tkl->expire_at, tkl->set_at,
 				                   tkl->ptr.spamfilter->tkl_duration,
 				                   tkl->ptr.spamfilter->tkl_reason,
+				                   tkl->ptr.spamfilter->replace,
 				                   0);
 				/* Further down in the code we free fields of the TKL entry,
 				 * this is generally fine since almost all fields are copied

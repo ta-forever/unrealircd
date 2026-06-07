@@ -258,7 +258,7 @@ RPC_CALL_FUNC(rpc_spamfilter_add)
 	}
 
 	tkl = tkl_add_spamfilter(type, NULL, targets, banact_value_to_struct(action), m, NULL, NULL, set_by, 0, TStime(),
-	                         ban_duration, reason, 0);
+	                         ban_duration, reason, NULL, 0);
 
 	if (!tkl)
 	{

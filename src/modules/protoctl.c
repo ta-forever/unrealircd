@@ -126,6 +126,10 @@ CMD_FUNC(cmd_protoctl)
 		{
 			SetBIGLINES(client);
 		}
+		else if (!strcmp(name, "SFREPLACE"))
+		{
+			SetSFREPLACE(client);
+		}
 		else if (!strcmp(name, "NICKCHARS") && value)
 		{
 			if (!IsServer(client) && !IsEAuth(client) && !IsHandshake(client))

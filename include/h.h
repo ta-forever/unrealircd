@@ -814,6 +814,7 @@ extern MODVAR TKL *(*tkl_add_spamfilter)(int type, const char *id, unsigned shor
                                          const char *setby,
                                          time_t expire_at, time_t set_at,
                                          time_t spamf_tkl_duration, const char *spamf_tkl_reason,
+                                         const char *spamf_replace,
                                          int flags);
 extern MODVAR TKL *(*find_tkl_serverban)(int type, const char *usermask, const char *hostmask, int softban);
 extern MODVAR TKL *(*find_tkl_banexception)(int type, const char *usermask, const char *hostmask, int softban);
@@ -833,7 +834,7 @@ extern MODVAR void (*tkl_stats)(Client *cptr, int type, const char *para, int *c
 extern MODVAR void (*tkl_sync)(Client *client);
 extern MODVAR void (*cmd_tkl)(Client *client, MessageTag *recv_mtags, int parc, const char *parv[]);
 extern MODVAR int (*take_action)(Client *client, BanAction *actions, const char *reason, long duration, int take_action_flags, int *stopped);
-extern MODVAR int (*match_spamfilter)(Client *client, const char *str_in, int type, const char *cmd, const char *target, int flags, TKL **rettk);
+extern MODVAR int (*match_spamfilter)(Client *client, const char *str_in, int type, const char *cmd, const char *target, int flags, TKL **rettk, const char **replaced);
 extern MODVAR int (*match_spamfilter_mtags)(Client *client, MessageTag *mtags, const char *cmd);
 extern MODVAR int (*join_viruschan)(Client *client, TKL *tk, int type);
 extern MODVAR const char *(*StripColors)(const char *text);
@@ -1050,6 +1051,7 @@ extern void unreal_delete_match(Match *m);
 extern int unreal_match(Match *m, const char *str);
 extern int unreal_match_method_strtoval(const char *str);
 extern char *unreal_match_method_valtostr(int val);
+extern const char *unreal_pcre2_substitute(pcre2_code *re, const char *subject, const char *replacement);
 #ifdef _WIN32
 extern MODVAR BOOL IsService;
 #endif
