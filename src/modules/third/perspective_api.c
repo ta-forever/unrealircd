@@ -405,13 +405,22 @@ int process_clients_hook()
 
 #define RESPONSE_DATA_BUFFER_SIZE 4096
 
+// Accumulates the HTTP response across curl write callbacks. curl may deliver
+// the body in several chunks, so we track how much has been written so far.
+typedef struct {
+    char* buffer;
+    size_t capacity; // total size of buffer, including room for the NUL terminator
+    size_t length;   // bytes written so far (excluding the NUL terminator)
+} ResponseBuffer;
+
 double get_toxicity_score(const char* text, char* completion_error, int completion_error_buffer_size)
 {
     CURLcode res;
     struct curl_slist* headers = NULL;
-    char postdata[1024];
+    char* postdata = NULL;
     double toxicity_score = -1;
     char response_data[RESPONSE_DATA_BUFFER_SIZE] = "";
+    ResponseBuffer response = { response_data, sizeof(response_data), 0 };
     completion_error[0] = '\0';
 
     char* api_key = get_perspective_api_key();
@@ -427,9 +436,26 @@ double get_toxicity_score(const char* text, char* completion_error, int completi
         return toxicity_score;
     }
 
-    snprintf(postdata, sizeof(postdata),
-        "{\"comment\": {\"text\": \"%s\"}, \"requestedAttributes\": {\"TOXICITY\": {}}}",
-        text);
+    // Build the request body with jansson so the message text is properly
+    // JSON-escaped (quotes, backslashes, control chars, etc). Interpolating
+    // the raw text into the JSON string produces invalid payloads.
+    {
+        json_t* request = json_pack("{s:{s:s}, s:{s:{}}}",
+            "comment", "text", text,
+            "requestedAttributes", "TOXICITY");
+        if (!request) {
+            strncpy(completion_error, "Unable to build JSON request body", completion_error_buffer_size);
+            curl_easy_cleanup(curl);
+            return toxicity_score;
+        }
+        postdata = json_dumps(request, JSON_COMPACT);
+        json_decref(request);
+        if (!postdata) {
+            strncpy(completion_error, "Unable to serialize JSON request body", completion_error_buffer_size);
+            curl_easy_cleanup(curl);
+            return toxicity_score;
+        }
+    }
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
     // Build the full URL with the API key
@@ -438,9 +464,13 @@ double get_toxicity_score(const char* text, char* completion_error, int completi
 
     curl_easy_setopt(curl, CURLOPT_URL, api_url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postdata);
+    // CURLOPT_COPYPOSTFIELDS makes curl copy the body immediately, so we can
+    // free our serialized buffer right away (and on any later early return).
+    curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, postdata);
+    free(postdata);
+    postdata = NULL;
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, response_data);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
     res = curl_easy_perform(curl);
 
@@ -499,14 +529,24 @@ double get_toxicity_score(const char* text, char* completion_error, int completi
 
 size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp)
 {
-    size_t ncopy = size * nmemb;
-    if (ncopy > RESPONSE_DATA_BUFFER_SIZE - 1)
+    size_t total = size * nmemb;
+    ResponseBuffer* resp = (ResponseBuffer*)userp;
+
+    // Remaining space, reserving one byte for the NUL terminator.
+    size_t space = resp->capacity - 1 - resp->length;
+    size_t ncopy = total < space ? total : space;
+
+    if (ncopy > 0)
     {
-        ncopy = RESPONSE_DATA_BUFFER_SIZE - 1;
+        memcpy(resp->buffer + resp->length, contents, ncopy);
+        resp->length += ncopy;
+        resp->buffer[resp->length] = '\0';
     }
-    memcpy(userp, contents, ncopy);
-    ((char*)contents)[ncopy] = 0;
-    return ncopy;
+
+    // Report all bytes as consumed even if we truncated; returning less than
+    // 'total' would make curl abort the transfer with CURLE_WRITE_ERROR. The
+    // response is small, so dropping any overflow past our buffer is fine.
+    return total;
 }
 
 static char* get_perspective_api_key()
